@@ -21,7 +21,7 @@ echo "merging GBWT"
 vg gbwt -m -f -o $base.all.gbwt $(for i in $chroms; do echo $base.$i.gbwt; done)
 
 echo "extracting threads as paths"
-for i in $chroms; do ( vg mod $(for f in $(vg paths -L -x $base.$i.xg ); do echo -n ' -r '$f; done) $base.$i.vg; vg paths -x $base.$i.xg -g $base.$i.gbwt -T -V ); vg view -v - >$base.$i.threads.vg; done
+for i in $chroms; do ( vg mod $(for f in $(vg paths -L -x $base.$i.xg ); do echo -n ' -r '$f; done) $base.$i.vg; vg paths -x $base.$i.xg -g $base.$i.gbwt -T -V ) | vg view -v - >$base.$i.threads.vg; done
 
 echo "re-indexing haps+threads"
 vg index -x $base.threads.xg $(for i in $chroms; do echo $base.$i.threads.vg; done)
