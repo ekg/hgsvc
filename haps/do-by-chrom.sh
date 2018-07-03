@@ -2,27 +2,30 @@
 #!/bin/bash
 
 base=$1
+ref=~/graphs/human/hg38.fa
+vars=~/graphs/hgsvc/haps/HGSVC.haps.vcf.gz
+
+chroms=$(cat $ref.fai | cut -f 1)
 
 echo "constructing"
-(seq 1 22; echo X; echo Y) | parallel -j 24 'vg construct -r reference.fa -v ~/graphs/hgsvc/haps/HGSVC.haps.vcf.gz -R $i -C -m 128 -a -f > '${base}'chr{}.vg'
+echo $chroms | tr ' ' '\n' | parallel -j 24 "vg construct -r $ref -v $vars -R {} -C -m 32 -a -f > $base.{}.vg"
 
 echo "node id unification"
-vg ids -j -m ${base}mapping $(for i in $(seq 1 22; echo X; echo Y); do echo $base.chr${i}.vg; done)
-cp ${base}mapping ${base}mapping.backup
+vg ids -j -m $base.mapping $(for i in $chroms; do echo $base.$i.vg; done)
+cp $base.mapping $.base.mapping.backup
 
 echo "indexing haplotypes"
-(echo X; seq 1 22; echo Y) | parallel -j 12 "vg index -G ${base}chr{}.gbwt -v ~/graphs/hgsvc/haps/HGSVC.haps.vcf.gz -F ${base}chr{}.threads ${base}chr{}.vg"
+echo $chroms | tr ' ' '\n' | parallel -j 12 "vg index -x $base.{}.xg -G $base.{}.gbwt -v $vars -F $base.{}.threads $base.{}.vg"
 
 echo "merging GBWT"
-vg gbwt -m -f -o ${base}all.gbwt $(for i in $(seq 1 22; echo X; echo Y); do echo ${base}chr${i}.gbwt; done)
-
-echo "building xg index"
-vg index -x ${base}all.xg $(for i in $(seq 1 22; echo X; echo Y); do echo ${base}chr${i}.vg; done)
-
-time vg index -p -x HGSVC.haps.xg -G HGSVC.haps.gbwt -v ~/graphs/hgsvc/haps/HGSVC.haps.vcf.gz HGSVC.haps.vg
+vg gbwt -m -f -o $base.all.gbwt $(for i in $chroms; do echo $base.$i.gbwt; done)
 
 echo "extracting threads as paths"
-time ( vg mod $(for f in $(vg paths -L -x HGSVC.haps.xg ); do echo -n ' -r '$f; done) HGSVC.haps.vg; vg paths -x HGSVC.haps.xg -g HGSVC.haps.gbwt -T -V ) | vg view -v - >HGSVC.haps+threads.vg
+for i in $chroms; do ( vg mod $(for f in $(vg paths -L -x $base.$i.xg ); do echo -n ' -r '$f; done) $base.$i.vg; vg paths -x $base.$i.xg -g $base.$i.gbwt -T -V ); vg view -v - >$base.$i.threads.vg; done
 
 echo "re-indexing haps+threads"
-time vg index -x HGSVC.haps+threads.xg HGSVC.haps+threads.vg
+vg index -x $base.threads.xg $(for i in $chroms; do echo $base.$i.threads.vg; done)
+
+echo "building gcsa2 index"
+mkdir -p work
+vg index -g $base.threads.gcsa -k 16 -p -b work $(for i in $chroms; do echo $base.$i.threads.vg; done)
