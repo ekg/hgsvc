@@ -4,8 +4,9 @@ base=$1
 threads=20
 ref=./hg38.fa
 
-#chroms=$(cat $ref.fai | cut -f 1)
-chroms=$(for i in $(seq 1 22; echo X; echo Y); do echo chr${i}; done)
+chroms=$(cat $ref.fai | cut -f 1)
+#chroms=$(for i in $(seq 1 22; echo X; echo Y); do echo chr${i}; done)
+#chroms=chr21
 
 echo "constructing HG00514"
 echo $chroms | tr ' ' '\n' | parallel -j $threads "vg construct -r $ref -v ./HGSVC.HG00514.vcf.gz -R {} -C -m 32 -a -f > $base-add0.{}.vg"
@@ -24,7 +25,7 @@ echo "xg indexing"
 vg index -x $base.xg -g $base.gcsa -k 16 -b work -p -t $threads $(for i in $chroms; do echo $base.$i.vg; done)
 
 echo "pruning"
-echo $chroms | tr ' ' '\n' | parallel -j $threads "vg prune -r {} $base.{}.vg > $base.{}.prune.vg"
+echo $chroms | tr ' ' '\n' | parallel -j $threads "vg prune -r $base.{}.vg > $base.{}.prune.vg"
 
 echo "gcsa indexing"
 mkdir work

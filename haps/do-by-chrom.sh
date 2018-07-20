@@ -2,13 +2,15 @@
 #!/bin/bash
 
 base=$1
-ref=~/graphs/human/hg38.fa
-vars=~/graphs/hgsvc/haps/HGSVC.haps.vcf.gz
+ref=./hg38.fa
+vars=./HGSVC.haps.vcf.gz
 
 chroms=$(cat $ref.fai | cut -f 1)
+#chroms=$(for i in $(seq 1 22; echo X; echo Y); do echo chr${i}; done)
+#chroms=chr21
 
 echo "constructing"
-echo $chroms | tr ' ' '\n' | parallel -j 24 "vg construct -r $ref -v $vars -R {} -C -m 32 -a -f > $base.{}.vg"
+echo $chroms | tr ' ' '\n' | parallel -j 14 "vg construct -r $ref -v $vars -R {} -C -m 32 -a -f > $base.{}.vg"
 
 echo "node id unification"
 vg ids -j -m $base.mapping $(for i in $chroms; do echo $base.$i.vg; done)
@@ -28,4 +30,4 @@ vg index -x $base.threads.xg $(for i in $chroms; do echo $base.$i.threads.vg; do
 
 echo "building gcsa2 index"
 mkdir -p work
-vg index -g $base.threads.gcsa -k 16 -p -b work $(for i in $chroms; do echo $base.$i.threads.vg; done)
+TMPDIR=. vg index -g $base.threads.gcsa -k 16 -p -b work $(for i in $chroms; do echo $base.$i.threads.vg; done)

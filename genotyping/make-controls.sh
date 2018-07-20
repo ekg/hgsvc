@@ -6,13 +6,13 @@
 #gzip -d hg38.fa.gz
 HG38=../haps/hg38.fa 
 
-ref=../haps/hg38.fa
-vars=../haps/HGSVC.haps.vcf.gz
-
-chroms=$(grep -v _alt $ref.fai | cut -f 1)
+chroms=$(cat $ref.fai | cut -f 1)
+#chroms=$(for i in $(seq 1 22; echo X; echo Y); do echo chr${i}; done)
+#chroms=chr21
+#HG38=../haps/hg38_chr21.fa 
 
 #Make a primary control graph and its indexes
-toil-vg construct ./jsc ./controls --fasta ${HG38} --fasta_regions --realTimeLogging  --xg_index --gcsa_index --out_name primary --restart --workDir .
+rm -rf jsc ; toil-vg construct ./jsc ./controls --fasta ${HG38} --region ${chroms} --realTimeLogging  --xg_index --gcsa_index --out_name hg38  --primary  --workDir . --gcsa_index_cores 20
 
 #Make a bwa index
 bwa index ${HG38} -p ./controls/hg38.fa

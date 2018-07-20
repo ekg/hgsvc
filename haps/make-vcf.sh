@@ -6,7 +6,7 @@ ls *hap0.vcf.gz | cut -f 1 -d\. | while read base; do echo $base; time vcfcombin
 for SAMPLE in HG00514 HG005733 NA19240; do gzip -dc ${SAMPLE}.haps.vcf.gz | vcfkeepinfo - NA | vcffixup - | bgziptabix HGSVC.${SAMPLE}.vcf.gz; done
 
 # Merge the samples
-bcftools merge -0 HG00514.haps.vcf.gz HG005733.haps.vcf.gz NA19240.haps.vcf.gz | bgziptabix HGSVC.haps.vcf.gz
+bcftools merge -0 HGSVC.HG00514.vcf.gz HGSVC.HG005733.vcf.gz HGSVC.NA19240.vcf.gz | bgziptabix HGSVC.haps.vcf.gz
 
 # vcfcombine drops a lot of stuff.  replacing with bcftools above
 #vcfcombine HG00514.haps.vcf.gz HG005733.haps.vcf.gz NA19240.haps.vcf.gz | awk 'BEGIN { OFS = "\t"} $10 == "." { $10 = "0|0" } $11 == "." { $11 = "0|0" } $12 == "." { $12 = "0|0" } { print }' | vcfkeepinfo - NA | vcffixup - | bgziptabix HGSVC.haps.vcf.gz

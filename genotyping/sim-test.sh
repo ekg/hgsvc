@@ -7,12 +7,30 @@
 usage() {
     # Print usage to stderr
     exec 1>&2
-    printf "Usage: $0 <Sample> \n"
+    printf "Usage: $0 [OPTIONS] <SAMPLE> <HGSVC_BASE> \n"
+	 printf "Options:\n"
+	 printf "\t-1\t\tSkip simulation\n"
+	 printf "\t-2\t\tSkip simulation and alignment\n"
+	 printf "\t-t\t N\tUse up to N threads\n"
     exit 1
 }
 
-while getopts "" o; do
+THREADS=20
+SIM=1
+ALIGN=1
+
+while getopts "t:12" o; do
     case "${o}" in
+        t)
+            THREADS=${OPTARG}
+            ;;
+        1)
+            SIM=0
+            ;;
+        2)
+            SIM=0
+				ALIGN=0
+            ;;
         *)
             usage
             ;;
@@ -21,45 +39,58 @@ done
 
 shift $((OPTIND-1))
 
-if [[ "$#" -lt "1" ]]; then
+if [[ "$#" -lt "2" ]]; then
     # Too few arguments
     usage
 fi
 
-# Needs to have been made in ../haps so: HG007733 or HG00514 or NA19240
+# Needs to have been made in ../haps so: HG005733 or HG00514 or NA19240
 SAMPLE="${1}"
+shift
+
+# Base of path to vg indexes: ex ../haps/hgsvc_v1.threads
+HGSVC_BASE="${1}"
 shift
 
 #wget http://hgdownload.soe.ucsc.edu/goldenPath/hg38/bigZips/hg38.fa.gz
 #gzip -d hg38.fa.gz
 HG38=../haps/hg38.fa 
+SAMPLE_VCF=../haps/HGSVC.${SAMPLE}.vcf.gz
 
 CHROM=chr21
 GAM_PREFIX=${SAMPLE}_sim_5M
 NUMREADS=5000000
-JS=./js_${SAMPLE}_${NUMREADS}
+NAME=simtest-$(basename ${HGSVC_BASE})-${SAMPLE}
+JS=./js_${NAME}_${NUMREADS}
+OS=./${NAME}
 
-# Make a sample VCF
-gzip -dc ../haps/${SAMPLE}.haps.vcf.gz | vcfkeepinfo - NA | vcffixup - | bgziptabix ./${SAMPLE}.vcf.gz 
+if [ $SIM == "1" ]
+then
+	 # Make a graph for each haplotype thread of SAMPLE to simulate from
+	 rm -rf ${JS} haplo_${NAME}.log; toil-vg construct ${JS} ${OS} --realTimeLogging --vcf ${SAMPLE_VCF} --fasta ${HG38} --haplo_sample ${SAMPLE} --xg_index --regions ${CHROM} --out_name hgsvc_baseline --logFile haplo_${NAME}.log --maxCores $THREADS --flat_alts
 
-# Make a graph for each haplotype thread of SAMPLE to simulate from
-rm -rf ${JS} haplo.log; toil-vg construct ${JS} ./simtest-${SAMPLE} --realTimeLogging --vcf ./${SAMPLE}.vcf.gz --fasta ${HG38} --haplo_sample ${SAMPLE} --xg_index --regions ${CHROM} --out_name hgsvc_baseline --logFile haplo.log
+	 # Simulate some reads for this sample using thread graphs made above
+	 rm -rf ${JS} sim_${NAME}.log; toil-vg sim ${JS} ${OS}/hgsvc_baseline_${SAMPLE}_haplo_thread_0.xg ${OS}/hgsvc_baseline_${SAMPLE}_haplo_thread_1.xg ${NUMREADS} ${OS} --realTimeLogging --fastq ftp://ftp-trace.ncbi.nlm.nih.gov/giab/ftp/data/NA12878/NIST_NA12878_HG001_HiSeq_300x/131219_D00360_005_BH814YADXX/Project_RM8398/Sample_U5a/U5a_AGTCAA_L002_R1_007.fastq.gz --gam  --out_name ${GAM_PREFIX} --fastq_out --sim_chunks 20 --logFile sim_${NAME}.log --seed 23 --maxCores $THREADS
 
-# Simulate some reads for this sample using thread graphs made above
-rm -rf ${JS} sim.log; toil-vg sim ${JS} ./simtest-${SAMPLE}/hgsvc_baseline_${SAMPLE}_haplo_thread_0.xg ./simtest-${SAMPLE}/hgsvc_baseline_${SAMPLE}_haplo_thread_1.xg ${NUMREADS} ./simtest-${SAMPLE} --realTimeLogging --fastq ftp://ftp-trace.ncbi.nlm.nih.gov/giab/ftp/data/NA12878/NIST_NA12878_HG001_HiSeq_300x/131219_D00360_005_BH814YADXX/Project_RM8398/Sample_U5a/U5a_AGTCAA_L002_R1_007.fastq.gz --gam  --out_name ${GAM_PREFIX} --fastq_out --sim_chunks 20 --logFile sim.log --seed 23
+	 # Make a version of the reads for bwa
+	 bgzip -dc ${OS}/${GAM_PREFIX}.fq.gz - | sed 's/fragment_\([0-9]*\)_[0-9]/fragment_\1/g' | bgzip > ${OS}/${GAM_PREFIX}_bwa.fq.gz &
+fi
 
-# Make a version of the reads for bwa
-bgzip -dc ./simtest-${SAMPLE}/${GAM_PREFIX}.fq.gz - | sed 's/fragment_\([0-9]*\)_[0-9]/fragment_\1/g' | bgzip > ./simtest-${SAMPLE}/${GAM_PREFIX}_bwa.fq.gz &
+if [ $ALIGN == "1" ]
+then
+	 # Remap simulated reads to the full graph (takes about 3.5 hours on 32 cores)
+	 echo "Mapping simulated reads back to hgsvc graph"
+	 time vg map -d ${HGSVC_BASE} -f ${OS}/${GAM_PREFIX}.fq.gz -i  -t $THREADS > ${OS}/${GAM_PREFIX}_remapped.gam
 
-# Remap simulated reads to the full graph (takes about 3.5 hours on 32 cores)
-echo "Mapping simulated reads back to hgsvc graph"
-vg map -d ../haps/hgsvc_v1.threads -f ./simtest-${SAMPLE}/${GAM_PREFIX}.fq.gz -i  -t 20 > ./simtest-${SAMPLE}/${GAM_PREFIX}_remapped.gam
+	 # Remap simulated reads to the control graph
+	 time vg map -d ./controls/primary -f ${OS}/${GAM_PREFIX}.fq.gz -i  -t $THREADS > ${OS}/${GAM_PREFIX}_remapped_primary.gam
 
-# Remap simulated reads to the control graph
-vg map -d ./controls/primary -f ./simtest-${SAMPLE}/${GAM_PREFIX}.fq.gz -i  -t 20 > ./simtest-${SAMPLE}/${GAM_PREFIX}_remapped_primary.gam
-
-# bwa mapping
-bwa mem ./hg38.fa ./simtest-${SAMPLE}/${GAM_PREFIX}_bwa.fq.gz -p -t 32 | samtools view -bS - > ./simtest-${SAMPLE}/${GAM_PREFIX}_bwa_remapped.bam
+	 # bwa mapping
+	 time bwa mem ./hg38.fa ${OS}/${GAM_PREFIX}_bwa.fq.gz -p -t $THREADS | samtools view -bS - > ${OS}/${GAM_PREFIX}_bwa_remapped.bam
+fi
 
 # run the calling and vcf evaluation
-rm -rf ${JS} calleval.log; toil-vg calleval ${JS} ./simtest-${SAMPLE}/ --whole_genome_config --realTimeLogging --bams ./simtest-${SAMPLE}/${GAM_PREFIX}_bwa_remapped.bam --bam_names bwa --chroms ${CHROM} --gams ./simtest-${SAMPLE}/${GAM_PREFIX}_remapped.gam ./simtest-${SAMPLE}/${GAM_PREFIX}_remapped_primary.gam --gam_names snp1kg primary --xg_paths ../haps/hgsvc_v1.threads.xg ./controls/primary.xg --vcfeval_fasta ${HG38} --vcfeval_baseline ../haps/HGSVC.haps.vcf.gz --vcfeval_opts " --squash-ploidy" --logFile calleval.log --call --freebayes  --sample_name ${SAMPLE} --workDir .
+rm -rf ${JS} calleval_${NAME}.log; toil-vg calleval ${JS} ${OS}/ --whole_genome_config --realTimeLogging --chroms ${CHROM} --gams ${OS}/${GAM_PREFIX}_remapped.gam ${OS}/${GAM_PREFIX}_remapped_primary.gam --gam_names hgsvc primary --xg_paths ${HGSVC_BASE}.xg ./controls/primary.xg --vcfeval_fasta ${HG38} --vcfeval_baseline ${SAMPLE_VCF}  --vcfeval_opts " --squash-ploidy --Xmax-length 15000" --logFile calleval_${NAME}.log --call  --sample_name ${SAMPLE} --workDir . --maxCores $THREADS 
+
+# disable freebayes and platypus for now.  they often produce no calls which crashes calleval
+#--bams ${OS}/${GAM_PREFIX}_bwa_remapped.bam --bam_names bwa  --freebayes --platypus
